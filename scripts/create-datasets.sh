@@ -17,7 +17,7 @@
 # sees them. Re-running is safe; existing datasets/folders are skipped.
 set -euo pipefail
 
-SERVICES="radarr sonarr prowlarr transmission plex seerr profilarr newtarr"
+SERVICES="radarr sonarr prowlarr transmission plex seerr profilarr newtarr dozzle"
 
 cd "$(dirname "$0")/.."
 [[ -f .env ]] || { echo "No .env found. Copy .env.example to .env first." >&2; exit 1; }
