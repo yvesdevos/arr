@@ -1,0 +1,172 @@
+# arr stack for TrueNAS 25.10.
+#
+# Do NOT paste this file into the TrueNAS UI directly. Paste the small
+# `include:` stub from README.md instead; it points at this file and at .env,
+# so ${VAR} interpolation works and secrets stay out of the UI.
+#
+# Every container mounts the media dataset at the same path (${MEDIA_MOUNT})
+# so Radarr/Sonarr/Transmission see identical paths and hardlinks work.
+
+x-common: &common
+  restart: unless-stopped
+  networks: [arr]
+  environment: &common-env
+    PUID: ${PUID}
+    PGID: ${PGID}
+    UMASK: ${UMASK}
+    TZ: ${TZ}
+
+services:
+  # ----- Orchestrate ----------------------------------------------------------
+  radarr:
+    <<: *common
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    volumes:
+      - /mnt/${APPS_DATASET}/radarr:/config
+      - /mnt/${MEDIA_DATASET}:${MEDIA_MOUNT}
+    ports:
+      - ${PORT_RADARR}:7878
+
+  sonarr:
+    <<: *common
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    volumes:
+      - /mnt/${APPS_DATASET}/sonarr:/config
+      - /mnt/${MEDIA_DATASET}:${MEDIA_MOUNT}
+    ports:
+      - ${PORT_SONARR}:8989
+
+  # ----- Index ----------------------------------------------------------------
+  prowlarr:
+    <<: *common
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    volumes:
+      - /mnt/${APPS_DATASET}/prowlarr:/config
+    ports:
+      - ${PORT_PROWLARR}:9696
+
+  flaresolverr:
+    restart: unless-stopped
+    networks: [arr]
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    environment:
+      TZ: ${TZ}
+      LOG_LEVEL: info
+    ports:
+      - ${PORT_FLARESOLVERR}:8191
+
+  # ----- Download -------------------------------------------------------------
+  transmission:
+    <<: *common
+    image: lscr.io/linuxserver/transmission:latest
+    container_name: transmission
+    environment:
+      <<: *common-env
+      USER: ${TRANSMISSION_USER}
+      PASS: ${TRANSMISSION_PASS}
+      PEERPORT: ${PORT_TRANSMISSION_PEER}
+    volumes:
+      - /mnt/${APPS_DATASET}/transmission:/config
+      - /mnt/${MEDIA_DATASET}:${MEDIA_MOUNT}
+    ports:
+      - ${PORT_TRANSMISSION}:9091
+      - ${PORT_TRANSMISSION_PEER}:${PORT_TRANSMISSION_PEER}
+      - ${PORT_TRANSMISSION_PEER}:${PORT_TRANSMISSION_PEER}/udp
+
+  # ----- Watch ----------------------------------------------------------------
+  plex:
+    <<: *common
+    image: lscr.io/linuxserver/plex:latest
+    container_name: plex
+    environment:
+      <<: *common-env
+      VERSION: docker
+      PLEX_CLAIM: ${PLEX_CLAIM}
+    volumes:
+      - /mnt/${APPS_DATASET}/plex:/config
+      - /mnt/${MEDIA_DATASET}:${MEDIA_MOUNT}:ro
+      # RAM-backed transcode scratch. Point Plex at it: Settings > Transcoder >
+      # "Transcoder temporary directory" = ${PLEX_TRANSCODE_MOUNT}.
+      - type: tmpfs
+        target: ${PLEX_TRANSCODE_MOUNT}
+        tmpfs:
+          size: ${PLEX_TRANSCODE_SIZE}
+    ports:
+      - ${PORT_PLEX}:32400
+      - 1900:1900/udp
+      - 32410:32410/udp
+      - 32412:32412/udp
+      - 32413:32413/udp
+      - 32414:32414/udp
+    # Intel QuickSync (UHD 630). The linuxserver image adds PUID to the
+    # render/video group of the device automatically. Needs Plex Pass.
+    devices:
+      - /dev/dri:/dev/dri
+    # Tuned limits. Note the tmpfs above is charged to this memory limit, so
+    # PLEX_MEMORY must leave headroom above PLEX_TRANSCODE_SIZE.
+    deploy:
+      resources:
+        limits:
+          cpus: ${PLEX_CPUS}
+          memory: ${PLEX_MEMORY}
+
+  # ----- Request --------------------------------------------------------------
+  seerr:
+    restart: unless-stopped
+    networks: [arr]
+    image: ghcr.io/seerr-team/seerr:latest
+    container_name: seerr
+    init: true
+    user: ${PUID}:${PGID}
+    environment:
+      TZ: ${TZ}
+      LOG_LEVEL: info
+    volumes:
+      - /mnt/${APPS_DATASET}/seerr:/app/config
+    ports:
+      - ${PORT_SEERR}:5055
+    depends_on: [radarr, sonarr, plex]
+
+  # ----- Supporting -----------------------------------------------------------
+  profilarr:
+    <<: *common
+    image: ghcr.io/dictionarry-hub/profilarr:latest
+    container_name: profilarr
+    volumes:
+      - /mnt/${APPS_DATASET}/profilarr:/config
+    ports:
+      - ${PORT_PROFILARR}:6868
+    depends_on: [radarr, sonarr]
+
+  newtarr:
+    restart: unless-stopped
+    networks: [arr]
+    image: ghcr.io/elfhosted/newtarr:latest
+    container_name: newtarr
+    environment:
+      TZ: ${TZ}
+    volumes:
+      - /mnt/${APPS_DATASET}/newtarr:/config
+    ports:
+      - ${PORT_NEWTARR}:9705
+    depends_on: [radarr, sonarr]
+
+  dozzle:
+    restart: unless-stopped
+    networks: [arr]
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    environment:
+      DOZZLE_NO_ANALYTICS: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - ${PORT_DOZZLE}:8080
+
+networks:
+  arr:
+    name: arr
