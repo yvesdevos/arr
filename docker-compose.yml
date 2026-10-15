@@ -32,7 +32,9 @@ services:
 
   sonarr:
     <<: *common
-    image: lscr.io/linuxserver/sonarr:latest
+    # develop (v5), not latest (v4): the migrated database was written by
+    # Sonarr 5.x from the TrueNAS app, and Sonarr cannot run on a newer schema.
+    image: lscr.io/linuxserver/sonarr:develop
     container_name: sonarr
     volumes:
       - /mnt/${APPS_DATASET}/sonarr:/config
