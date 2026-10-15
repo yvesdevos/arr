@@ -35,7 +35,8 @@ if [[ -n "$running" ]]; then
 fi
 
 migrate() {
-  local svc=$1 src=$2 dst="/mnt/${APPS_DATASET}/${svc}"
+  local svc=$1 src=$2
+  local dst="/mnt/${APPS_DATASET}/${svc}"
   if [[ -z "$src" ]]; then echo "==> $svc: skipped (no OLD_*_CONFIG)"; return; fi
   if [[ ! -d "$src" ]]; then echo "==> $svc: source $src not found, skipping" >&2; return; fi
   echo "==> $svc: $src -> $dst"
