@@ -147,12 +147,12 @@ services:
     depends_on: [radarr, sonarr]
 
   newtarr:
-    restart: unless-stopped
-    networks: [arr]
-    image: ghcr.io/elfhosted/newtarr:latest
+    # NeutArr: maintained fork of NewtArr (itself a Huntarr fork). The original
+    # ghcr.io/elfhosted/newtarr package is no longer pullable. Same port and
+    # /config layout; the service, dataset and PORT_NEWTARR names are kept.
+    <<: *common
+    image: iampuid0/neutarr:latest
     container_name: newtarr
-    environment:
-      TZ: ${TZ}
     volumes:
       - /mnt/${APPS_DATASET}/newtarr:/config
     ports:
