@@ -46,6 +46,8 @@ services:
     <<: *common
     image: lscr.io/linuxserver/prowlarr:latest
     container_name: prowlarr
+    labels:
+      dev.dozzle.update: auto
     volumes:
       - /mnt/${APPS_DATASET}/prowlarr:/config
     ports:
@@ -56,6 +58,8 @@ services:
     networks: [arr]
     image: ghcr.io/flaresolverr/flaresolverr:latest
     container_name: flaresolverr
+    labels:
+      dev.dozzle.update: auto
     environment:
       TZ: ${TZ}
       LOG_LEVEL: info
@@ -124,6 +128,8 @@ services:
     networks: [arr]
     image: ghcr.io/seerr-team/seerr:latest
     container_name: seerr
+    labels:
+      dev.dozzle.update: auto
     init: true
     user: ${PUID}:${PGID}
     environment:
@@ -140,6 +146,8 @@ services:
     <<: *common
     image: ghcr.io/dictionarry-hub/profilarr:latest
     container_name: profilarr
+    labels:
+      dev.dozzle.update: auto
     volumes:
       - /mnt/${APPS_DATASET}/profilarr:/config
     ports:
@@ -153,6 +161,8 @@ services:
     <<: *common
     image: iampuid0/neutarr:latest
     container_name: newtarr
+    labels:
+      dev.dozzle.update: auto
     volumes:
       - /mnt/${APPS_DATASET}/newtarr:/config
     ports:
@@ -164,6 +174,8 @@ services:
     networks: [arr]
     image: amir20/dozzle:latest
     container_name: dozzle
+    labels:
+      dev.dozzle.update: auto
     environment:
       DOZZLE_NO_ANALYTICS: "true"
     volumes:
