@@ -5,7 +5,8 @@
 # so ${VAR} interpolation works and secrets stay out of the UI.
 #
 # Every container mounts the media dataset at the same path (${MEDIA_MOUNT})
-# so Radarr/Sonarr/Transmission see identical paths and hardlinks work.
+# and the downloads dataset at ${DOWNLOADS_MOUNT}, so Radarr/Sonarr/Transmission
+# see identical paths.
 
 x-common: &common
   restart: unless-stopped
@@ -25,6 +26,7 @@ services:
     volumes:
       - /mnt/${APPS_DATASET}/radarr:/config
       - /mnt/${MEDIA_DATASET}:${MEDIA_MOUNT}
+      - /mnt/${DOWNLOADS_DATASET}:${DOWNLOADS_MOUNT}
     ports:
       - ${PORT_RADARR}:7878
 
@@ -35,6 +37,7 @@ services:
     volumes:
       - /mnt/${APPS_DATASET}/sonarr:/config
       - /mnt/${MEDIA_DATASET}:${MEDIA_MOUNT}
+      - /mnt/${DOWNLOADS_DATASET}:${DOWNLOADS_MOUNT}
     ports:
       - ${PORT_SONARR}:8989
 
@@ -72,6 +75,7 @@ services:
     volumes:
       - /mnt/${APPS_DATASET}/transmission:/config
       - /mnt/${MEDIA_DATASET}:${MEDIA_MOUNT}
+      - /mnt/${DOWNLOADS_DATASET}:${DOWNLOADS_MOUNT}
     ports:
       - ${PORT_TRANSMISSION}:9091
       - ${PORT_TRANSMISSION_PEER}:${PORT_TRANSMISSION_PEER}
