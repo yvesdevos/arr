@@ -5,8 +5,8 @@
 # so ${VAR} interpolation works and secrets stay out of the UI.
 #
 # Every container mounts the media dataset at the same path (${MEDIA_MOUNT})
-# and the downloads dataset at ${DOWNLOADS_MOUNT}, so Radarr/Sonarr/Transmission
-# see identical paths.
+# and the downloads dataset at ${DOWNLOADS_MOUNT}, so Radarr/Sonarr and the
+# torrent clients see identical paths.
 
 x-common: &common
   restart: unless-stopped
@@ -86,6 +86,42 @@ services:
       - ${PORT_TRANSMISSION}:9091
       - ${PORT_TRANSMISSION_PEER}:${PORT_TRANSMISSION_PEER}
       - ${PORT_TRANSMISSION_PEER}:${PORT_TRANSMISSION_PEER}/udp
+
+  # qBittorrent + qui run alongside Transmission during the switch-over.
+  # Radarr/Sonarr talk to qBittorrent through qui's proxy, not directly;
+  # see README.md "Switching to qBittorrent and qui".
+  qbittorrent:
+    <<: *common
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    environment:
+      <<: *common-env
+      WEBUI_PORT: 8080
+      TORRENTING_PORT: ${PORT_QBITTORRENT_PEER}
+    volumes:
+      - /mnt/${APPS_DATASET}/qbittorrent:/config
+      - /mnt/${MEDIA_DATASET}:${MEDIA_MOUNT}
+      - /mnt/${DOWNLOADS_DATASET}:${DOWNLOADS_MOUNT}
+    ports:
+      - ${PORT_QBITTORRENT}:8080
+      - ${PORT_QBITTORRENT_PEER}:${PORT_QBITTORRENT_PEER}
+      - ${PORT_QBITTORRENT_PEER}:${PORT_QBITTORRENT_PEER}/udp
+
+  qui:
+    # Web UI and API proxy for qBittorrent. PUID/PGID are honoured by its own
+    # entrypoint (it chowns /config and drops root), so no `user:` line here.
+    <<: *common
+    image: ghcr.io/autobrr/qui:latest
+    container_name: qui
+    labels:
+      dev.dozzle.update: auto
+    volumes:
+      - /mnt/${APPS_DATASET}/qui:/config
+      - /mnt/${MEDIA_DATASET}:${MEDIA_MOUNT}
+      - /mnt/${DOWNLOADS_DATASET}:${DOWNLOADS_MOUNT}
+    ports:
+      - ${PORT_QUI}:7476
+    depends_on: [qbittorrent]
 
   # ----- Watch ----------------------------------------------------------------
   plex:

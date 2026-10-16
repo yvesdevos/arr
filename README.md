@@ -2,16 +2,20 @@
 
 Replaces the individually installed TrueNAS apps (Radarr, Sonarr, Prowlarr,
 Plex, Transmission) with one Docker Compose stack managed by the TrueNAS UI,
-and adds Seerr, FlareSolverr, Profilarr, Newtarr and Dozzle.
+and adds Seerr, FlareSolverr, Profilarr, Newtarr, Dozzle, and qBittorrent
+with qui as the replacement download client.
 
 Existing app configs and all media are kept. Nothing is rebuilt.
 
 ```
-Seerr ─► Radarr ─┐
-       ► Sonarr ─┴► Prowlarr (+FlareSolverr) ─► Transmission ─► /mnt/<hdd>/media ─► Plex
-                 ▲
+Seerr ─► Radarr ─┐                                  ┌► qui ─► qBittorrent ─┐
+       ► Sonarr ─┴► Prowlarr (+FlareSolverr) ───────┤                      ├─► /mnt/<hdd>/downloads ─► /mnt/<hdd>/media ─► Plex
+                 ▲                                  └► Transmission ───────┘
    Profilarr, Newtarr          Dozzle: logs for everything
 ```
+
+Transmission stays until its torrents have been moved to qBittorrent; see
+[Switching to qBittorrent and qui](#8-switching-to-qbittorrent-and-qui).
 
 ## Layout
 
@@ -170,15 +174,18 @@ After editing `docker-compose.yml` or `.env` on disk, restart the app
 
 | Service | URL | What to check |
 |---|---|---|
-| Dozzle | `http://nas:9999` | All 10 containers green; read any red ones first |
+| Dozzle | `http://nas:9999` | All 12 containers green; read any red ones first |
 | Radarr | `http://nas:7878` | Movies list intact; System › Status has no path warnings |
 | Sonarr | `http://nas:8989` | Same |
 | Prowlarr | `http://nas:9696` | Indexers still sync to Radarr/Sonarr. Apps › Radarr: server should be `http://radarr:7878` |
 | Transmission | `http://nas:9091` | Download dir shows under `MEDIA_MOUNT`; a test torrent lands in `downloads/` |
+| qBittorrent | `http://nas:8080` | Logs in with the password you set in step 8; save path under `DOWNLOADS_MOUNT` |
+| qui | `http://nas:7476` | Instance `qbittorrent` shows connected; torrent list matches qBittorrent |
 | Plex | `http://nas:32400/web` | Libraries present; Settings › Libraries › paths start with `MEDIA_MOUNT` |
 
 Inside the compose network containers reach each other by name
-(`http://radarr:7878`, `http://transmission:9091`, `http://plex:32400`).
+(`http://radarr:7878`, `http://transmission:9091`, `http://qbittorrent:8080`,
+`http://qui:7476`, `http://plex:32400`).
 If the old configs used the NAS IP, those still work too.
 
 New services:
@@ -206,6 +213,85 @@ Once everything checks out for a few days:
    `<SSD_POOL>/apps/arr`, e.g. daily keep 2 weeks. Rolling back a bad
    app update is then a one-click affair.
 
+## 8. Switching to qBittorrent and qui
+
+qBittorrent and qui run next to Transmission so the switch can happen
+gradually. qBittorrent cannot read Transmission's state files, so every
+torrent has to be re-added, and local ratio/upload totals start from zero.
+Trackers count ratio server side, so that loss is cosmetic.
+
+### First start
+
+1. **qBittorrent password.** The image prints a temporary `admin` password
+   to its log on every start until you set one: Dozzle › qbittorrent, or
+   `docker logs qbittorrent`. Log in at `http://nas:8080`, then Tools ›
+   Options › Web UI: set a password, and untick "Enable Host header
+   validation" if the UI refuses `nas:8080`.
+2. **Paths.** Options › Downloads: default save path
+   `DOWNLOADS_MOUNT/complete` (e.g. `/downloads/complete`), keep incomplete
+   torrents in `DOWNLOADS_MOUNT/incomplete`. These are the same paths
+   Transmission used, so files move between clients without copying.
+3. **Peer port.** Options › Connection: the port equals
+   `PORT_QBITTORRENT_PEER` (set by the image). Forward it on the router as
+   long as both clients run; once Transmission is gone, set
+   `PORT_QBITTORRENT_PEER=51413` in `.env` and reuse the existing forward.
+4. **qui.** `http://nas:7476`, create the admin user, then Instances › Add:
+   name `qbittorrent`, host `http://qbittorrent:8080`, the WebUI user and
+   password from step 1.
+5. **Proxy keys.** qui › Settings › Client Proxy › Create Client API Key,
+   one each for Radarr and Sonarr. Copy the `/proxy/<key>` path; qui shows
+   it only once.
+
+### Point the arrs at qui
+
+In Radarr and Sonarr, Settings › Download Clients › + › qBittorrent, with
+Show Advanced on:
+
+- Host `qui`, port `7476`, URL Base `/proxy/<key>` for that app.
+- Username and password empty; qui authenticates to qBittorrent.
+- Category `radarr` / `sonarr`. No remote path mapping: the containers
+  share `DOWNLOADS_MOUNT`.
+
+Test, save, and leave the Transmission client enabled until its queue is
+empty. New grabs now go to qBittorrent; in-flight Transmission downloads
+still import when they finish.
+
+### Move the seeding torrents
+
+Wait until Transmission has no incomplete torrents. Partial files do not
+match between the clients (Transmission writes `.part`, qBittorrent
+`.!qB`), so anything unfinished would be re-downloaded.
+
+Transmission's config dir has one `.torrent` per torrent under
+`/mnt/<APPS_DATASET>/transmission/torrents/`. Each must be added to
+qBittorrent with the save path it has in Transmission. Two ways:
+
+- **Script.** [transmission-to-qbittorrent](https://github.com/Mythologyli/transmission-to-qbittorrent)
+  reads each torrent's save path over Transmission's RPC and adds it over
+  qBittorrent's API. Run it from the NAS with `torrent_dir` set to the host
+  path above, both web UIs reachable on the `PORT_*` ports. Try it on a few
+  torrents first. With `skip_check` off, qBittorrent rechecks every file,
+  which takes hours on a large seeding set; with it on, it trusts the
+  paths, so only turn it on once a sample has verified clean.
+- **By hand.** If every torrent lives in `downloads/complete`, drag the
+  `.torrent` files into qBittorrent with "Skip hash check" ticked and the
+  default save path. Torrents in other folders need their path set
+  individually.
+
+Then, in qui, confirm the torrents show as seeding, not "missing files",
+and that Transmission and qBittorrent are not both seeding the same
+torrent for longer than needed: stop Transmission (Dozzle › transmission ›
+Stop, or remove its torrents without deleting data).
+
+### Retire Transmission
+
+1. Delete the Transmission download client in Radarr and Sonarr.
+2. Remove the `transmission` service from `docker-compose.yml` and
+   `scripts/create-datasets.sh`, and `TRANSMISSION_*` / `OLD_TRANSMISSION_*`
+   from `.env`. Set `PORT_QBITTORRENT_PEER=51413`.
+3. Restart the app. Keep the `transmission` dataset for a few weeks in case
+   a torrent needs to be re-added.
+
 ## Updating images
 
 Apps › arr › Update pulls `:latest` for every service. To pin a version,
@@ -222,6 +308,12 @@ change the tag in `docker-compose.yml` and restart the app.
   root folder prefix stored in the migrated database. Fix in the UI or
   change `MEDIA_MOUNT` and restart.
 - **Port conflict on start:** change the `PORT_*` in `.env`, restart.
+- **qBittorrent WebUI "Unauthorized" from qui or the arrs:** the password
+  in qui › Instances does not match qBittorrent's. If you never set one,
+  it changes on every container start; set it in Tools › Options › Web UI.
+- **qui cannot reach qBittorrent:** the instance host must be
+  `http://qbittorrent:8080` (container port), not the `PORT_QBITTORRENT`
+  host port.
 - **Plex transcodes in software despite the iGPU:** check `ls -l /dev/dri`
   on the host shows `renderD128`, and that `docker exec plex ls -l /dev/dri`
   shows the same. The linuxserver image handles group membership; if it
